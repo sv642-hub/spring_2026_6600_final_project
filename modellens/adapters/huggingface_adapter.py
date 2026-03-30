@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 import torch
 
 from modellens.adapters.base import BaseAdapter
+from modellens.analysis.hf_inputs import hf_inputs_to_dict
 
 
 class HuggingFaceAdapter(BaseAdapter):
@@ -81,10 +82,12 @@ class HuggingFaceAdapter(BaseAdapter):
         """
         # If inputs are strings and we have a tokenizer, tokenize first
         if isinstance(inputs, str) and self._tokenizer:
-            tokens = self._tokenizer(inputs, return_tensors="pt")
-            output = model(**tokens, **kwargs)
+            batch = hf_inputs_to_dict(
+                self._tokenizer(inputs, return_tensors="pt")
+            )
+            output = model(**batch, **kwargs)
         elif isinstance(inputs, dict) or hasattr(inputs, "input_ids"):
-            output = model(**inputs, **kwargs)
+            output = model(**hf_inputs_to_dict(inputs), **kwargs)
         else:
             output = model(inputs, **kwargs)
 

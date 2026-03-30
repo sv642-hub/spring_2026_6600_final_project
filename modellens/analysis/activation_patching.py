@@ -48,8 +48,9 @@ def run_activation_patching(
     if layer_names is None:
         layer_names = _get_sublayers(model)
 
-    # Clear any leftover hooks
-    _clear_all_hooks(model)
+    # Remove ModelLens-managed hooks only (do not nuke unrelated library hooks).
+    if hasattr(lens, "clear"):
+        lens.clear()
 
     # Step 1: Get clean metric
     with torch.no_grad():
@@ -88,6 +89,7 @@ def run_activation_patching(
         "corrupted_metric": corrupted_metric,
         "total_effect": corrupted_metric - clean_metric,
         "patch_effects": patch_effects,
+        "layers_ordered": list(layer_names),
     }
 
 
@@ -161,12 +163,6 @@ def _get_sublayers(model) -> List[str]:
         elif name.endswith(".self_attn") or name.endswith(".self_attention"):
             sublayers.append(name)
     return sublayers
-
-
-def _clear_all_hooks(model) -> None:
-    """Remove all forward hooks from the model."""
-    for _, module in model.named_modules():
-        module._forward_hooks.clear()
 
 
 def _default_metric(output) -> float:

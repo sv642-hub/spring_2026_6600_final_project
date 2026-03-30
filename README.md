@@ -10,11 +10,13 @@ An open-source interpretability toolkit for PyTorch neural networks. ModelLens p
 - **Activation Patching** — Causal intervention analysis to identify which components drive specific behaviors
 - **Embeddings Inspection** — Analyze input embedding representations and token similarity
 - **Residual Stream Analysis** — Trace information flow through skip connections and measure per-layer contributions
+- **Visualization** — Plotly-based figures (heatmaps, trajectories, patching bars, shape traces) for notebooks and slides
+- **Gradio App** — Guided multi-tab explorer plus a one-click “presentation story” mode
 
 ## Supported Backends
 
-- **HuggingFace** — Any `PreTrainedModel` (GPT-2, BERT, LLaMA, etc.)
-- **PyTorch** — Vanilla `nn.Module` models
+- **HuggingFace** — Any `PreTrainedModel` (GPT-2, BERT, LLaMA, etc.); attention weights via `output_attentions=True`
+- **PyTorch** — Vanilla `nn.Module` models; attention hooks work when modules expose weights in outputs (see limitations below)
 
 ## Installation
 
@@ -24,10 +26,16 @@ cd modellens
 pip install -e .
 ```
 
-For visualization and development dependencies:
+Visualization (Plotly, pandas) and the web app (Gradio):
 
 ```bash
-pip install -e ".[viz,dev]"
+pip install -e ".[viz,app]"
+```
+
+Optional development extras:
+
+```bash
+pip install -e ".[viz,app,dev]"
 ```
 
 ## Quick Start
@@ -36,50 +44,83 @@ pip install -e ".[viz,dev]"
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from modellens import ModelLens
 
-# Load a model
 model = GPT2LMHeadModel.from_pretrained("gpt2-medium", attn_implementation="eager")
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
 
-# Wrap it with ModelLens
 lens = ModelLens(model)
 lens.adapter.set_tokenizer(tokenizer)
 
-# Run logit lens analysis
 tokens = tokenizer("The capital of France is", return_tensors="pt")
 lens.attach_all()
-results = lens.logit_lens(tokens, top_k=5)
+results = lens.logit_lens(tokens, top_k=5)  # passes tokenizer from adapter for decoded top-k
 ```
+
+## Visualization (package API)
+
+Analysis functions return dicts with stable keys for plotting (`token_labels`, `layers_ordered`, etc.). Build figures from `modellens.visualization`:
+
+```python
+from modellens.analysis.attention import run_attention_analysis
+from modellens.visualization import plot_attention_heatmap, plot_logit_lens_heatmap
+
+attn = run_attention_analysis(lens, tokens)
+fig = plot_attention_heatmap(attn, layer_index=0, head_index=0)
+fig.show()
+
+ll = lens.logit_lens(tokens, top_k=5)
+fig2 = plot_logit_lens_heatmap(ll, top_ranks=5)
+fig2.show()
+```
+
+Export HTML for slides:
+
+```python
+fig.write_html("attention.html")
+```
+
+Quick script (writes `viz_out/*.html`):
+
+```bash
+python examples/quick_viz_demo.py --out ./viz_out
+```
+
+## Gradio App
+
+After `pip install -e ".[app]"`:
+
+```bash
+modellens-gradio
+# or
+python -m app.main
+```
+
+Open the URL printed in the terminal. **Load a model** on the Overview tab first, then use Attention, Logit Lens, Patching, Residual/Embedding, or **Presentation story** (curated narrative).
 
 ## Analysis Modules
 
 ### Logit Lens
 
-See what the model would predict at each intermediate layer:
-
 ```python
 from modellens.analysis.logit_lens import run_logit_lens, decode_logit_lens
 
-results = run_logit_lens(lens, tokens, top_k=5)
+results = run_logit_lens(lens, tokens, top_k=5, tokenizer=tokenizer)
 decoded = decode_logit_lens(results, tokenizer=tokenizer)
-
-for layer, predictions in decoded.items():
-    print(f"{layer} -> {predictions[0]}")
 ```
 
-### Attention Analysis
+`results` includes `layers_ordered` and, when `tokenizer` is passed, `top_tokens_per_layer` / `top_probs_per_layer`.
 
-Extract attention maps and identify focused vs diffuse heads:
+### Attention Analysis
 
 ```python
 from modellens.analysis.attention import run_attention_analysis, head_summary
 
-attn_results = run_attention_analysis(lens, "The capital of France is")
+attn_results = run_attention_analysis(lens, tokens)  # prefer tokenized dict for labels
 summary = head_summary(attn_results)
 ```
 
-### Activation Patching
+Returns `token_labels`, `layers_ordered`, and `backend`.
 
-Identify causally important components by patching corrupted activations:
+### Activation Patching
 
 ```python
 from modellens.analysis.activation_patching import run_activation_patching
@@ -87,12 +128,12 @@ from modellens.analysis.activation_patching import run_activation_patching
 clean = tokenizer("The capital of France is", return_tensors="pt")
 corrupted = tokenizer("The MX of France is", return_tensors="pt")
 
-results = run_activation_patching(lens, clean, corrupted, metric_fn=my_metric)
+results = run_activation_patching(lens, clean, corrupted)  # optional layer_names=...
 ```
 
-### Residual Stream Analysis
+Clean and corrupted sequences must have the **same length**. Patching calls `lens.clear()` at the start (ModelLens hooks only), not a global hook wipe.
 
-Measure how much each layer contributes to the residual stream:
+### Residual Stream Analysis
 
 ```python
 from modellens.analysis.residual_stream import run_residual_analysis, identify_critical_layers
@@ -103,25 +144,27 @@ critical = identify_critical_layers(results, threshold=0.05)
 
 ### Embeddings Inspection
 
-Analyze token embeddings and their relationships:
-
 ```python
 from modellens.analysis.embeddings import run_embeddings_analysis
 
 results = run_embeddings_analysis(lens, tokens)
 print(results["similarity_matrix"])
+print(results.get("token_labels"))
 ```
 
 ## Project Structure
 
 ```
 modellens/
-│   ├── core/           # ModelLens class and hook infrastructure
-│   ├── adapters/       # HuggingFace and PyTorch backend adapters
-│   ├── analysis/       # Interpretability analysis modules
-│   ├── visualization/  # Plotting and visualization utilities
-│   └── utils/          # Shared helper functions
-├── app/                # Gradio web interface
-├── tests/              # Unit tests
-└── examples/           # Demo notebooks
+│   ├── core/            # ModelLens, HookManager
+│   ├── adapters/        # HuggingFace and PyTorch adapters
+│   ├── analysis/        # Interpretability routines
+│   └── visualization/   # Plotly helpers + shared styling
+app/                     # Gradio presentation shell (main.py, components.py, demo_data.py)
+examples/                # Notebooks and quick_viz_demo.py
 ```
+
+## Limitations
+
+- **Vanilla PyTorch attention**: `nn.MultiheadAttention` does not return attention weights unless configured (`need_weights=True`). Hook-based attention capture may not apply to all custom modules.
+- **Residual analysis** compares consecutive hooked activations with **matching shapes**; `attach_all` order follows `named_modules()`.

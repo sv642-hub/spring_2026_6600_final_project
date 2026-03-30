@@ -1,5 +1,31 @@
 import torch
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+from modellens.analysis.hf_inputs import hf_inputs_to_dict
+
+
+def _token_labels_from_inputs(lens, inputs: Any) -> List[str]:
+    """Best-effort decode of input_ids to strings for axis labels."""
+    input_ids: Optional[torch.Tensor] = None
+    if hasattr(inputs, "input_ids"):
+        input_ids = inputs["input_ids"]
+    elif isinstance(inputs, dict) and "input_ids" in inputs:
+        input_ids = inputs["input_ids"]
+    if input_ids is None:
+        return []
+
+    ids = input_ids[0].detach().cpu().tolist() if input_ids.dim() else []
+    tok = getattr(lens.adapter, "_tokenizer", None)
+    if tok is not None:
+        try:
+            return [tok.decode([i]) for i in ids]
+        except Exception:
+            pass
+        try:
+            return tok.convert_ids_to_tokens(ids)
+        except Exception:
+            pass
+    return [str(i) for i in ids]
 
 
 def run_attention_analysis(
@@ -14,7 +40,8 @@ def run_attention_analysis(
         layer_names: Specific attention layers to analyze. If None, auto-detects.
 
     Returns:
-        Dict with attention weights per layer
+        Dict with ``attention_maps``, ``num_layers``, and visualization-friendly
+        keys ``token_labels``, ``layers_ordered``, ``backend`` (v1 contract).
     """
     # Find attention layers if not specified
     if layer_names is None:
@@ -35,9 +62,9 @@ def _extract_hf_attention(lens, inputs, layer_names, **kwargs) -> Dict:
     """Extract attention using HuggingFace's built-in output_attentions flag."""
     # Tokenize if needed
     if isinstance(inputs, str):
-        tokens = lens.adapter.tokenize(inputs)
+        tokens = hf_inputs_to_dict(lens.adapter.tokenize(inputs))
     else:
-        tokens = inputs if isinstance(inputs, dict) else {"input_ids": inputs}
+        tokens = hf_inputs_to_dict(inputs)
 
     # Run with attention output enabled
     with torch.no_grad():
@@ -54,14 +81,20 @@ def _extract_hf_attention(lens, inputs, layer_names, **kwargs) -> Dict:
             "seq_length": attn.shape[-1],
         }
 
+    token_labels = _token_labels_from_inputs(lens, tokens)
+    layers_ordered = list(results.keys())
     return {
         "attention_maps": results,
         "num_layers": len(attentions),
+        "token_labels": token_labels,
+        "layers_ordered": layers_ordered,
+        "backend": "huggingface",
     }
 
 
 def _extract_hook_attention(lens, inputs, layer_names, **kwargs) -> Dict:
     """Extract attention weights using hooks for vanilla PyTorch models."""
+    lens.clear()
     attention_weights = {}
 
     def make_attn_hook(name):
@@ -93,9 +126,17 @@ def _extract_hook_attention(lens, inputs, layer_names, **kwargs) -> Dict:
             "seq_length": weights.shape[-1],
         }
 
+    tok_labels = _token_labels_from_inputs(
+        lens, inputs if isinstance(inputs, dict) else {"input_ids": inputs}
+    )
+    layers_ordered = list(results.keys())
+    lens.clear()
     return {
         "attention_maps": results,
         "num_layers": len(results),
+        "token_labels": tok_labels,
+        "layers_ordered": layers_ordered,
+        "backend": "pytorch_hooks",
     }
 
 
@@ -108,7 +149,8 @@ def head_summary(attention_results: Dict) -> Dict:
         Dict with entropy and max attention per head per layer
     """
     summary = {}
-    for name, data in attention_results["attention_maps"].items():
+    maps = attention_results.get("attention_maps") or {}
+    for name, data in maps.items():
         weights = data["weights"]
 
         if weights.dim() == 4:

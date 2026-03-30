@@ -94,11 +94,14 @@ class ModelLens:
         return self.hooks.get(layer_name)
 
     # ---- Analysis Methods (delegate to analysis modules) ----
-    def logit_lens(self, inputs, **kwargs):
+    def logit_lens(self, inputs, tokenizer=None, **kwargs):
         """Run logit lens analysis on the model."""
         from modellens.analysis.logit_lens import run_logit_lens
 
-        return run_logit_lens(self, inputs, **kwargs)
+        tok = tokenizer
+        if tok is None and hasattr(self.adapter, "_tokenizer"):
+            tok = getattr(self.adapter, "_tokenizer", None)
+        return run_logit_lens(self, inputs, tokenizer=tok, **kwargs)
 
     def attention_map(self, inputs, **kwargs):
         """Extract attention maps from the model."""
@@ -106,12 +109,12 @@ class ModelLens:
 
         return run_attention_analysis(self, inputs, **kwargs)
 
-    def activation_patch(self, clean_input, corrupted_input, layer_names, **kwargs):
+    def activation_patch(self, clean_input, corrupted_input, layer_names=None, **kwargs):
         """Run activation patching analysis."""
         from modellens.analysis.activation_patching import run_activation_patching
 
         return run_activation_patching(
-            self, clean_input, corrupted_input, layer_names, **kwargs
+            self, clean_input, corrupted_input, layer_names=layer_names, **kwargs
         )
 
     def residual_stream(self, inputs, **kwargs):

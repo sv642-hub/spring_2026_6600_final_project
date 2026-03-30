@@ -3,6 +3,37 @@ import torch.nn.functional as F
 from typing import Dict, List, Optional
 
 
+def _embed_token_labels(lens, inputs, **kwargs) -> List[str]:
+    """Decode token ids to labels for embedding plots."""
+    input_ids = None
+    if isinstance(inputs, str):
+        if hasattr(lens.adapter, "_tokenizer") and lens.adapter._tokenizer:
+            tokens = lens.adapter.tokenize(inputs)
+            input_ids = tokens["input_ids"]
+    elif isinstance(inputs, dict) and "input_ids" in inputs:
+        input_ids = inputs["input_ids"]
+    elif hasattr(inputs, "input_ids"):
+        input_ids = inputs["input_ids"]
+    elif isinstance(inputs, torch.Tensor):
+        input_ids = inputs
+
+    if input_ids is None:
+        return []
+
+    ids = input_ids[0].detach().cpu().tolist() if input_ids.dim() else []
+    tok = getattr(lens.adapter, "_tokenizer", None)
+    if tok is not None:
+        try:
+            return [tok.decode([i]) for i in ids]
+        except Exception:
+            pass
+        try:
+            return tok.convert_ids_to_tokens(ids)
+        except Exception:
+            pass
+    return [str(i) for i in ids]
+
+
 def run_embeddings_analysis(lens, inputs, **kwargs) -> Dict:
     """
     Analyze the embedding representations of the input.
@@ -25,12 +56,14 @@ def run_embeddings_analysis(lens, inputs, **kwargs) -> Dict:
     # Compute pairwise cosine similarity between token embeddings
     similarity = _cosine_similarity_matrix(embeddings[0])
 
+    labels = _embed_token_labels(lens, inputs, **kwargs)
     return {
         "embeddings": embeddings,  # (batch, seq_len, embed_dim)
         "norms": norms,  # (batch, seq_len)
         "similarity_matrix": similarity,  # (seq_len, seq_len)
         "embed_dim": embeddings.shape[-1],
         "seq_length": embeddings.shape[1],
+        "token_labels": labels,
     }
 
 

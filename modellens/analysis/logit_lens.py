@@ -4,7 +4,12 @@ from typing import Dict, List, Optional
 
 
 def run_logit_lens(
-    lens, inputs, layer_names: Optional[List[str]] = None, top_k: int = 5, **kwargs
+    lens,
+    inputs,
+    layer_names: Optional[List[str]] = None,
+    top_k: int = 5,
+    tokenizer=None,
+    **kwargs,
 ) -> Dict:
     """
     Run logit lens analysis: project each layer's hidden state through the
@@ -63,10 +68,37 @@ def run_logit_lens(
             "top_k_probs": top_probs,
         }
 
-    return {
+    layers_ordered = list(results.keys())
+    top_tokens_per_layer: Optional[List[List[str]]] = None
+    top_probs_per_layer: Optional[List[List[float]]] = None
+    if tokenizer is not None:
+        top_tokens_per_layer = []
+        top_probs_per_layer = []
+        for name in layers_ordered:
+            idx = results[name]["top_k_indices"][0]
+            pr = results[name]["top_k_probs"][0]
+            toks = []
+            for i in range(idx.shape[0]):
+                tid = idx[i].item()
+                try:
+                    toks.append(
+                        tokenizer.convert_ids_to_tokens([tid])[0]
+                    )
+                except Exception:
+                    toks.append(tokenizer.decode([tid]))
+            top_tokens_per_layer.append(toks)
+            top_probs_per_layer.append([float(pr[j].item()) for j in range(pr.shape[0])])
+
+    out: Dict = {
         "layer_results": results,
         "final_output": output,
+        "layers_ordered": layers_ordered,
+        "top_k": top_k,
     }
+    if top_tokens_per_layer is not None:
+        out["top_tokens_per_layer"] = top_tokens_per_layer
+        out["top_probs_per_layer"] = top_probs_per_layer
+    return out
 
 
 def decode_logit_lens(results: Dict, tokenizer=None, vocab=None) -> Dict:
@@ -91,10 +123,14 @@ def decode_logit_lens(results: Dict, tokenizer=None, vocab=None) -> Dict:
         probs = data["top_k_probs"][0]
 
         if tokenizer:
-            decoded[name] = [
-                (tokenizer.decode(idx.item()), prob.item())
-                for idx, prob in zip(indices, probs)
-            ]
+            decoded[name] = []
+            for idx, prob in zip(indices, probs):
+                tid = idx.item()
+                try:
+                    tok = tokenizer.convert_ids_to_tokens([tid])[0]
+                except Exception:
+                    tok = tokenizer.decode([tid])
+                decoded[name].append((tok, prob.item()))
         else:
             decoded[name] = [
                 (vocab.get(idx.item(), f"[{idx.item()}]"), prob.item())
