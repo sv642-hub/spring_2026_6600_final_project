@@ -6,5 +6,3 @@ __pycache__/
 .eggs/
 dist/
 build/
-toy.html
-toy_files/
