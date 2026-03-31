@@ -21,6 +21,7 @@ from modellens.visualization.activation_patching import (
     plot_patching_importance_bar,
     plot_patching_importance_heatmap,
     plot_patching_recovery_fraction,
+    plot_patching_family_effect_recovery_heatmap,
 )
 from modellens.visualization.backward_flow import (
     plot_gradient_norm_distribution_by_family,
@@ -113,6 +114,7 @@ __all__ = [
     "plot_patching_importance_bar",
     "plot_patching_importance_heatmap",
     "plot_patching_recovery_fraction",
+    "plot_patching_family_effect_recovery_heatmap",
     "plot_residual_contributions",
     "plot_residual_lines",
     "plot_shape_trace_table",
