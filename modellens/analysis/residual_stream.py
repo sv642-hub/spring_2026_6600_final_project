@@ -82,6 +82,7 @@ def run_residual_analysis(
 
     return {
         "contributions": contributions,
+        "layers_ordered": list(contributions.keys()),
         "num_layers_analyzed": len(contributions),
         "total_stream_change": _total_change(layer_list),
     }
