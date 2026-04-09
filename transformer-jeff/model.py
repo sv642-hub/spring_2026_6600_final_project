@@ -70,6 +70,20 @@ def train_model(epochs=None):
         optimizer.step()
         if epoch % 2 == 0:
             print(f"Epoch {epoch} | Loss: {loss.item():.4f}")
+    save_path = "trained_transformer_jeff.pth"
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epochs_trained': epochs,
+        'final_loss': loss.item(),
+        'vocab_size': 3,
+        'd_model': 64,
+        'n_head': 4,
+        'n_layers': 4
+    }, save_path)
+    
+    print(f"Model saved to {save_path}")
+    return model
 
 if __name__ == "__main__":
     train_model()
